@@ -303,6 +303,30 @@ body {
   transition: width 0.15s ease;
 }
 
+/* ---------- Drag & drop overlay ---------- */
+
+#drop-hint {
+  position: absolute;
+  inset: 8px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  border: 2px dashed var(--accent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--viewport-bg) 80%, transparent);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  z-index: 50;
+  pointer-events: none;
+  text-align: center;
+  padding: 20px;
+}
+#drop-hint.show { display: flex; }
+#drop-hint svg { width: 34px; height: 34px; }
+
 /* ---------- Empty state ---------- */
 
 #empty-state {
@@ -740,10 +764,15 @@ body {
     <div id="measure-tags"></div>
     <div id="measure-tags2d"></div>
 
+    <div id="drop-hint">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+      <span>ここにファイルをドロップして開く</span>
+    </div>
+
     <div id="empty-state">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg>
       <h2>ファイルを開いてください</h2>
-      <p>右上の「開く」からIFC(.ifc/.ifcxml)またはCAD図面(.dxf/.jww)を選択すると、ここに表示されます。</p>
+      <p>右上の「開く」からIFC(.ifc/.ifcxml)またはCAD図面(.dxf/.jww)を選択するか、ここにファイルをドラッグ&ドロップすると表示されます。</p>
       <p style="opacity:.75;">IFC:1本指で回転・2本指でズーム/移動。ダブルタップした位置が回転の中心になります。</p>
       <p style="opacity:.75;">図面:ドラッグでパン、ピンチ/ホイールでズーム。</p>
       <p style="opacity:.75;">DWGファイルは無料のODA File ConverterなどでDXFに変換してからお使いください。</p>
@@ -8182,7 +8211,9 @@ window.__WEB_IFC_WASM_B64__ = "AGFzbQEAAAAB9QiEAWACf38AYAF/AGABfwF/YAJ/fwF/YAN/f
     loading: $("loading"),
     loadingText: $("loading-text"),
     emptyState: $("empty-state"),
-    toast: $("toast")
+    toast: $("toast"),
+    viewportWrap: $("viewport-wrap"),
+    dropHint: $("drop-hint")
   };
 
   var currentMode = null; // null | "ifc" | "2d"
@@ -8277,6 +8308,41 @@ window.__WEB_IFC_WASM_B64__ = "AGFzbQEAAAAB9QiEAWACf38AYAF/AGABfwF/YAJ/fwF/YAN/f
     var file = el.fileInput.files && el.fileInput.files[0];
     handleFile(file);
     el.fileInput.value = ""; // allow re-selecting the same file
+  });
+
+  /* ---------------- Drag & drop ----------------
+     Dropping a file anywhere on the viewport opens it, same as picking it via "開く". Two
+     concerns beyond the obvious dragover/drop pair:
+     - The browser's default behavior for a dropped file is to navigate to/open it directly,
+       discarding the whole app - that has to be prevented at the document level, not just on
+       the drop target, or a drop that misses the target (or lands on the topbar/dock) blows
+       away the page.
+     - dragenter/dragleave fire for every element boundary crossed while dragging over nested
+       children (canvas, info-card, etc.), so a naive show-on-enter/hide-on-leave toggle flickers
+       constantly - a simple depth counter fixes that (only hide once the counter returns to 0). */
+  document.addEventListener("dragover", function (e) { e.preventDefault(); });
+  document.addEventListener("drop", function (e) { e.preventDefault(); });
+
+  var dragDepth = 0;
+  el.viewportWrap.addEventListener("dragenter", function (e) {
+    e.preventDefault();
+    dragDepth++;
+    if (el.dropHint) el.dropHint.classList.add("show");
+  });
+  el.viewportWrap.addEventListener("dragover", function (e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+  el.viewportWrap.addEventListener("dragleave", function () {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0 && el.dropHint) el.dropHint.classList.remove("show");
+  });
+  el.viewportWrap.addEventListener("drop", function (e) {
+    e.preventDefault();
+    dragDepth = 0;
+    if (el.dropHint) el.dropHint.classList.remove("show");
+    var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    handleFile(file);
   });
 
   window.__unifiedViewer = { switchMode: switchMode, handleFile: handleFile, get currentMode() { return currentMode; } };
